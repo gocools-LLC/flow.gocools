@@ -12,6 +12,7 @@ import (
 
 	internalaws "github.com/gocools-LLC/flow.gocools/internal/aws"
 	"github.com/gocools-LLC/flow.gocools/internal/httpserver"
+	"github.com/gocools-LLC/flow.gocools/internal/observability"
 )
 
 var version = "dev"
@@ -46,6 +47,18 @@ func run() error {
 		}
 		logger.Info("aws_credentials_validation_succeeded")
 	}
+
+	tracingShutdown, err := observability.InitTracing(context.Background(), "flow", logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := tracingShutdown(shutdownCtx); shutdownErr != nil {
+			logger.Error("tracing shutdown failed", "error", shutdownErr)
+		}
+	}()
 
 	srv := httpserver.New(httpserver.Config{
 		Addr:    addr,

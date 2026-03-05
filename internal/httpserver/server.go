@@ -9,6 +9,11 @@ import (
 	"time"
 
 	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type Config struct {
@@ -48,15 +53,18 @@ func New(cfg Config) *http.Server {
 	if timelineService == nil {
 		timelineService = timeline.NewInMemoryService(nil)
 	}
+	metricsRegistry := prometheus.NewRegistry()
+	serverMetrics := newServerMetrics(metricsRegistry)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", statusHandler(version, "ok"))
 	mux.HandleFunc("/readyz", statusHandler(version, "ready"))
 	mux.HandleFunc("/api/v1/incidents/timeline", incidentTimelineHandler(timelineService))
+	mux.Handle("/metrics", promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}))
 
 	return &http.Server{
 		Addr:              addr,
-		Handler:           requestLogMiddleware(logger, mux),
+		Handler:           requestLogMiddleware(logger, mux, serverMetrics),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
@@ -154,23 +162,40 @@ func writeJSON(w http.ResponseWriter, code int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func requestLogMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
+func requestLogMiddleware(logger *slog.Logger, next http.Handler, metrics *serverMetrics) http.Handler {
+	tracer := otel.Tracer("flow.http")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		ctx, span := tracer.Start(r.Context(), r.Method+" "+r.URL.Path)
+
 		rec := &responseRecorder{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
+		next.ServeHTTP(rec, r.WithContext(ctx))
 
 		status := rec.statusCode
 		if status == 0 {
 			status = http.StatusOK
 		}
+		duration := time.Since(start)
+
+		metrics.observe(r.Method, r.URL.Path, status, duration)
+		span.SetAttributes(
+			attribute.String("http.method", r.Method),
+			attribute.String("http.path", r.URL.Path),
+			attribute.Int("http.status_code", status),
+			attribute.Int64("http.duration_ms", duration.Milliseconds()),
+		)
+		if status >= 500 {
+			span.SetStatus(codes.Error, http.StatusText(status))
+		}
+		span.End()
 
 		logger.Info(
 			"http_request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", duration.Milliseconds(),
 			"remote_addr", r.RemoteAddr,
 		)
 	})
@@ -184,4 +209,11 @@ type responseRecorder struct {
 func (r *responseRecorder) WriteHeader(statusCode int) {
 	r.statusCode = statusCode
 	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *responseRecorder) Write(p []byte) (int, error) {
+	if r.statusCode == 0 {
+		r.statusCode = http.StatusOK
+	}
+	return r.ResponseWriter.Write(p)
 }

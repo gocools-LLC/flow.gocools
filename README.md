@@ -14,6 +14,7 @@ Live infrastructure telemetry and analysis platform for cloud and platform teams
 go run ./cmd/flow
 curl -s localhost:8080/healthz
 curl -s localhost:8080/readyz
+curl -s localhost:8080/metrics
 ```
 
 Set a custom listen address with `FLOW_HTTP_ADDR`:
@@ -65,6 +66,7 @@ gocools:owner
 - [Telemetry Correlation Model](docs/telemetry-correlation-model.md)
 - [Telemetry Storage](docs/telemetry-storage.md)
 - [Incident Timeline API](docs/api/incident-timeline.md)
+- [Service Observability](docs/observability.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Roadmap](docs/roadmap.md)
 - [RFC-0001](docs/rfc/rfc-0001-platform.md)

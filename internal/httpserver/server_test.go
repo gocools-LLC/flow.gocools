@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,5 +145,29 @@ func TestIncidentTimelineEndpointBadStartReturns400(t *testing.T) {
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
+	}
+}
+
+func TestMetricsEndpointExposesHTTPMetrics(t *testing.T) {
+	handler := New(Config{
+		Version: "test-version",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Handler
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRes := httptest.NewRecorder()
+	handler.ServeHTTP(healthRes, healthReq)
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRes := httptest.NewRecorder()
+	handler.ServeHTTP(metricsRes, metricsReq)
+
+	if metricsRes.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, metricsRes.Code)
+	}
+
+	body := metricsRes.Body.String()
+	if !strings.Contains(body, "flow_http_requests_total") {
+		t.Fatalf("expected metrics output to contain flow_http_requests_total, got: %s", body)
 	}
 }
