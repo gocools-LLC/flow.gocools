@@ -3,12 +3,23 @@
 Live infrastructure telemetry and analysis platform for cloud and platform teams.
 
 ## Features
-- live infrastructure telemetry\n- CloudWatch metrics and logs correlation\n- infrastructure flow visualization\n- incident debugging and health monitoring
+- live infrastructure telemetry
+- CloudWatch metrics and logs correlation
+- infrastructure flow visualization
+- incident debugging and health monitoring
 
 ## Quick Start
 
 ```bash
 go run ./cmd/flow
+curl -s localhost:8080/healthz
+curl -s localhost:8080/readyz
+```
+
+Set a custom listen address with `FLOW_HTTP_ADDR`:
+
+```bash
+FLOW_HTTP_ADDR=:9090 go run ./cmd/flow
 ```
 
 ## Repository Layout
