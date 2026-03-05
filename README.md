@@ -57,6 +57,7 @@ gocools:owner
 
 - [Architecture](docs/architecture.md)
 - [Telemetry Correlation Model](docs/telemetry-correlation-model.md)
+- [Telemetry Storage](docs/telemetry-storage.md)
 - [Incident Timeline API](docs/api/incident-timeline.md)
 - [Roadmap](docs/roadmap.md)
 - [RFC-0001](docs/rfc/rfc-0001-platform.md)
