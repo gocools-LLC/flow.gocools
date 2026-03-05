@@ -8,8 +8,8 @@ Flow exposes Prometheus metrics at:
 
 Current key metrics:
 
-- `flow_http_requests_total{method,path,status}`
-- `flow_http_request_duration_seconds{method,path,status}`
+- `flow_http_requests_total{method,route,status}`
+- `flow_http_request_duration_seconds{method,route,status}`
 
 CloudWatch ingestion collectors also expose in-process retry metrics via `Collector.Metrics()`:
 
@@ -30,18 +30,18 @@ FLOW_OTEL_INSECURE=true
 Spans include attributes:
 
 - `http.method`
-- `http.path`
+- `http.route`
 - `http.status_code`
 - `http.duration_ms`
 
 ## Suggested Dashboard Panels
 
 1. Request rate by route:
-   `sum(rate(flow_http_requests_total[5m])) by (path)`
+   `sum(rate(flow_http_requests_total[5m])) by (route)`
 2. Error rate:
    `sum(rate(flow_http_requests_total{status=~"5.."}[5m])) / sum(rate(flow_http_requests_total[5m]))`
 3. P95 latency:
-   `histogram_quantile(0.95, sum(rate(flow_http_request_duration_seconds_bucket[5m])) by (le,path))`
+   `histogram_quantile(0.95, sum(rate(flow_http_request_duration_seconds_bucket[5m])) by (le,route))`
 
 ## Trace Queries
 

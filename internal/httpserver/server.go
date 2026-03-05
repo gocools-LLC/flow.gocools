@@ -168,6 +168,7 @@ func requestLogMiddleware(logger *slog.Logger, next http.Handler, metrics *serve
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ctx, span := tracer.Start(r.Context(), r.Method+" "+r.URL.Path)
+		route := normalizePathLabel(r.URL.Path)
 
 		rec := &responseRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r.WithContext(ctx))
@@ -178,10 +179,10 @@ func requestLogMiddleware(logger *slog.Logger, next http.Handler, metrics *serve
 		}
 		duration := time.Since(start)
 
-		metrics.observe(r.Method, r.URL.Path, status, duration)
+		metrics.observe(r.Method, route, status, duration)
 		span.SetAttributes(
 			attribute.String("http.method", r.Method),
-			attribute.String("http.path", r.URL.Path),
+			attribute.String("http.route", route),
 			attribute.Int("http.status_code", status),
 			attribute.Int64("http.duration_ms", duration.Milliseconds()),
 		)

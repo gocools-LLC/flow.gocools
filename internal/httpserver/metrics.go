@@ -18,7 +18,7 @@ func newServerMetrics(registry *prometheus.Registry) *serverMetrics {
 			Name: "flow_http_requests_total",
 			Help: "Total number of HTTP requests handled by Flow.",
 		},
-		[]string{"method", "path", "status"},
+		[]string{"method", "route", "status"},
 	)
 	requestDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -26,7 +26,7 @@ func newServerMetrics(registry *prometheus.Registry) *serverMetrics {
 			Help:    "HTTP request duration in seconds for Flow.",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"method", "path", "status"},
+		[]string{"method", "route", "status"},
 	)
 
 	registry.MustRegister(requestTotal, requestDuration)
@@ -37,8 +37,8 @@ func newServerMetrics(registry *prometheus.Registry) *serverMetrics {
 	}
 }
 
-func (m *serverMetrics) observe(method string, path string, status int, duration time.Duration) {
+func (m *serverMetrics) observe(method string, route string, status int, duration time.Duration) {
 	statusLabel := strconv.Itoa(status)
-	m.requestTotal.WithLabelValues(method, path, statusLabel).Inc()
-	m.requestDuration.WithLabelValues(method, path, statusLabel).Observe(duration.Seconds())
+	m.requestTotal.WithLabelValues(method, route, statusLabel).Inc()
+	m.requestDuration.WithLabelValues(method, route, statusLabel).Observe(duration.Seconds())
 }

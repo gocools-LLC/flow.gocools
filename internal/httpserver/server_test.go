@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestHealthzPayload(t *testing.T) {
@@ -170,4 +174,76 @@ func TestMetricsEndpointExposesHTTPMetrics(t *testing.T) {
 	if !strings.Contains(body, "flow_http_requests_total") {
 		t.Fatalf("expected metrics output to contain flow_http_requests_total, got: %s", body)
 	}
+}
+
+func TestMetricsEndpointNormalizesPathCardinality(t *testing.T) {
+	handler := New(Config{
+		Version: "test-version",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Handler
+
+	requests := []string{
+		"/api/v1/resources/550e8400-e29b-41d4-a716-446655440000",
+		"/api/v1/resources/550e8400-e29b-41d4-a716-446655440001",
+	}
+	for _, path := range requests {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRes := httptest.NewRecorder()
+	handler.ServeHTTP(metricsRes, metricsReq)
+
+	body := metricsRes.Body.String()
+	if !strings.Contains(body, `route="/api/v1/resources/:id"`) {
+		t.Fatalf("expected normalized route label in metrics output, got: %s", body)
+	}
+	if strings.Contains(body, "550e8400-e29b-41d4-a716-446655440000") || strings.Contains(body, "550e8400-e29b-41d4-a716-446655440001") {
+		t.Fatalf("expected raw IDs to be absent from metrics output, got: %s", body)
+	}
+}
+
+func TestRequestTracingUsesNormalizedRouteAttribute(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(recorder),
+	)
+
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(previous)
+	defer provider.Shutdown(t.Context())
+
+	handler := New(Config{
+		Version: "test-version",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Handler
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/resources/550e8400-e29b-41d4-a716-446655440000", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	spans := recorder.Ended()
+	if len(spans) == 0 {
+		t.Fatal("expected at least one ended span")
+	}
+
+	attrs := spans[len(spans)-1].Attributes()
+	if route, ok := attributeValue(attrs, "http.route"); !ok || route != "/api/v1/resources/:id" {
+		t.Fatalf("expected normalized http.route attribute, got %q (exists=%v)", route, ok)
+	}
+	if _, ok := attributeValue(attrs, "http.path"); ok {
+		t.Fatal("expected http.path attribute to be omitted by default")
+	}
+}
+
+func attributeValue(attrs []attribute.KeyValue, key string) (string, bool) {
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			return attr.Value.AsString(), true
+		}
+	}
+	return "", false
 }
