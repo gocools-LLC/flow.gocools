@@ -32,6 +32,12 @@ FLOW_AWS_VALIDATE_ON_START=true \
 go run ./cmd/flow
 ```
 
+Run the ingestion integration harness:
+
+```bash
+make test-integration
+```
+
 ## Repository Layout
 
 - `cmd/flow`: CLI entrypoint.

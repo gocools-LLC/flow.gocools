@@ -1,12 +1,15 @@
 BINARY := flow
 
-.PHONY: build test run fmt lint
+.PHONY: build test test-integration run fmt lint
 
 build:
 	go build ./...
 
 test:
 	go test ./...
+
+test-integration:
+	go test -v ./test/...
 
 run:
 	go run ./cmd/$(BINARY)
