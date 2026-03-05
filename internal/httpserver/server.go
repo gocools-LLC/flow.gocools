@@ -5,13 +5,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
 )
 
 type Config struct {
-	Addr    string
-	Version string
-	Logger  *slog.Logger
+	Addr            string
+	Version         string
+	Logger          *slog.Logger
+	TimelineService timeline.Service
 }
 
 type statusResponse struct {
@@ -40,15 +44,93 @@ func New(cfg Config) *http.Server {
 		version = "dev"
 	}
 
+	timelineService := cfg.TimelineService
+	if timelineService == nil {
+		timelineService = timeline.NewInMemoryService(nil)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", statusHandler(version, "ok"))
 	mux.HandleFunc("/readyz", statusHandler(version, "ready"))
+	mux.HandleFunc("/api/v1/incidents/timeline", incidentTimelineHandler(timelineService))
 
 	return &http.Server{
 		Addr:              addr,
 		Handler:           requestLogMiddleware(logger, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func incidentTimelineHandler(service timeline.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
+			return
+		}
+
+		start, err := parseRFC3339Query(r, "start")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid start query parameter"})
+			return
+		}
+		end, err := parseRFC3339Query(r, "end")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid end query parameter"})
+			return
+		}
+
+		page, err := parseIntQuery(r, "page")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid page query parameter"})
+			return
+		}
+		pageSize, err := parseIntQuery(r, "page_size")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid page_size query parameter"})
+			return
+		}
+
+		result, err := service.QueryTimeline(timeline.Query{
+			Start:    start,
+			End:      end,
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func parseRFC3339Query(r *http.Request, key string) (time.Time, error) {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed.UTC(), nil
+}
+
+func parseIntQuery(r *http.Request, key string) (int, error) {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return 0, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	if parsed < 0 {
+		return 0, strconv.ErrSyntax
+	}
+	return parsed, nil
 }
 
 func statusHandler(version string, status string) http.HandlerFunc {
