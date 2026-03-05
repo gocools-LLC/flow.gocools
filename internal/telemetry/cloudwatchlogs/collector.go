@@ -43,6 +43,9 @@ type CollectorConfig struct {
 	JitterFraction float64
 	Parser         Parser
 	Hooks          []ParseHook
+	Now            func() time.Time
+	Sleep          func(time.Duration)
+	RandFloat64    func() float64
 }
 
 type Client interface {
@@ -125,6 +128,21 @@ func NewCollector(client Client, cfg CollectorConfig) *Collector {
 
 	hooks := append([]ParseHook{}, cfg.Hooks...)
 
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+
+	sleep := cfg.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+
+	randFloat64 := cfg.RandFloat64
+	if randFloat64 == nil {
+		randFloat64 = rand.Float64
+	}
+
 	return &Collector{
 		client:         client,
 		maxAttempts:    maxAttempts,
@@ -134,9 +152,9 @@ func NewCollector(client Client, cfg CollectorConfig) *Collector {
 		jitterFraction: jitterFraction,
 		parser:         parser,
 		hooks:          hooks,
-		now:            time.Now,
-		sleep:          time.Sleep,
-		randFloat64:    rand.Float64,
+		now:            now,
+		sleep:          sleep,
+		randFloat64:    randFloat64,
 	}
 }
 
