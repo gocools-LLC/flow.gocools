@@ -68,6 +68,7 @@ gocools:owner
 - [Incident Timeline API](docs/api/incident-timeline.md)
 - [Service Observability](docs/observability.md)
 - [Release Checklist](docs/release-checklist.md)
+- [Release Notes v0.1.1](docs/releases/v0.1.1.md)
 - [Release Notes v0.1.0](docs/releases/v0.1.0.md)
 - [Roadmap](docs/roadmap.md)
 - [RFC-0001](docs/rfc/rfc-0001-platform.md)
