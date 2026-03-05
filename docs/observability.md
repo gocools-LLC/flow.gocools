@@ -11,6 +11,13 @@ Current key metrics:
 - `flow_http_requests_total{method,path,status}`
 - `flow_http_request_duration_seconds{method,path,status}`
 
+CloudWatch ingestion collectors also expose in-process retry metrics via `Collector.Metrics()`:
+
+- `throttled_responses`
+- `retry_attempts`
+- `retry_budget_exceeded`
+- `throttle_drops`
+
 ## Tracing
 
 Flow emits OpenTelemetry spans for inbound HTTP requests when configured:
@@ -40,4 +47,3 @@ Spans include attributes:
 
 - Find slow requests by route and filter spans where `http.duration_ms > 500`.
 - Group failures by `http.path` with `http.status_code >= 500`.
-

@@ -2,6 +2,7 @@ package cloudwatchlogs
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -144,18 +145,107 @@ func TestCollectRetriesOnThrottling(t *testing.T) {
 	if client.calls != 2 {
 		t.Fatalf("expected 2 calls due to retry, got %d", client.calls)
 	}
+
+	metrics := collector.Metrics()
+	if metrics.ThrottledResponses != 1 || metrics.RetryAttempts != 1 {
+		t.Fatalf("unexpected retry metrics: %+v", metrics)
+	}
+}
+
+func TestCollectStopsWhenRetryBudgetExhausted(t *testing.T) {
+	client := &fakeClient{
+		failuresBeforeSuccess: 10,
+	}
+
+	collector := NewCollector(client, CollectorConfig{
+		MaxAttempts:    8,
+		MaxRetryBudget: 2,
+		InitialBackoff: time.Millisecond,
+		JitterFraction: 0,
+	})
+	collector.sleep = func(time.Duration) {}
+	collector.now = func() time.Time { return time.Date(2026, 3, 5, 0, 5, 0, 0, time.UTC) }
+
+	_, err := collector.Collect(context.Background(), CollectRequest{
+		LogGroupName: "group-a",
+	})
+	if !errors.Is(err, ErrRetryBudgetExhausted) {
+		t.Fatalf("expected ErrRetryBudgetExhausted, got %v", err)
+	}
+
+	if client.calls != 3 {
+		t.Fatalf("expected 3 calls from retry budget, got %d", client.calls)
+	}
+
+	metrics := collector.Metrics()
+	if metrics.ThrottledResponses != 3 || metrics.RetryAttempts != 2 || metrics.RetryBudgetExceeded != 1 || metrics.ThrottleDrops != 1 {
+		t.Fatalf("unexpected budget metrics: %+v", metrics)
+	}
+}
+
+func TestCollectRetryBudgetSharedAcrossPagination(t *testing.T) {
+	throttleErr := &smithy.GenericAPIError{
+		Code:    "ThrottlingException",
+		Message: "rate exceeded",
+	}
+	client := &fakeClient{
+		pages: []*cwl.FilterLogEventsOutput{
+			{
+				Events:    []types.FilteredLogEvent{},
+				NextToken: awsString("page-2"),
+			},
+			{
+				Events: []types.FilteredLogEvent{},
+			},
+		},
+		errorByCall: map[int]error{
+			2: throttleErr,
+			3: throttleErr,
+		},
+	}
+
+	collector := NewCollector(client, CollectorConfig{
+		MaxAttempts:    5,
+		MaxRetryBudget: 1,
+		InitialBackoff: time.Millisecond,
+		JitterFraction: 0,
+	})
+	collector.sleep = func(time.Duration) {}
+	collector.now = func() time.Time { return time.Date(2026, 3, 5, 0, 5, 0, 0, time.UTC) }
+
+	_, err := collector.Collect(context.Background(), CollectRequest{
+		LogGroupName: "group-a",
+	})
+	if !errors.Is(err, ErrRetryBudgetExhausted) {
+		t.Fatalf("expected ErrRetryBudgetExhausted, got %v", err)
+	}
+
+	if client.calls != 3 {
+		t.Fatalf("expected 3 calls with shared budget across pages, got %d", client.calls)
+	}
+
+	metrics := collector.Metrics()
+	if metrics.ThrottledResponses != 2 || metrics.RetryAttempts != 1 || metrics.RetryBudgetExceeded != 1 || metrics.ThrottleDrops != 1 {
+		t.Fatalf("unexpected pagination budget metrics: %+v", metrics)
+	}
 }
 
 type fakeClient struct {
 	pages                 []*cwl.FilterLogEventsOutput
 	inputs                []*cwl.FilterLogEventsInput
 	calls                 int
+	successCalls          int
 	failuresBeforeSuccess int
+	errorByCall           map[int]error
 }
 
 func (f *fakeClient) FilterLogEvents(_ context.Context, input *cwl.FilterLogEventsInput, _ ...func(*cwl.Options)) (*cwl.FilterLogEventsOutput, error) {
 	f.calls++
 	f.inputs = append(f.inputs, input)
+
+	if err := f.errorByCall[f.calls]; err != nil {
+		return nil, err
+	}
 
 	if f.calls <= f.failuresBeforeSuccess {
 		return nil, &smithy.GenericAPIError{
@@ -164,7 +254,8 @@ func (f *fakeClient) FilterLogEvents(_ context.Context, input *cwl.FilterLogEven
 		}
 	}
 
-	pageIndex := f.calls - f.failuresBeforeSuccess - 1
+	f.successCalls++
+	pageIndex := f.successCalls - 1
 	if pageIndex < 0 || pageIndex >= len(f.pages) {
 		return &cwl.FilterLogEventsOutput{}, nil
 	}

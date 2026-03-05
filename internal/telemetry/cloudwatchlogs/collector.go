@@ -3,7 +3,10 @@ package cloudwatchlogs
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -35,6 +38,9 @@ type LogRecord struct {
 type CollectorConfig struct {
 	MaxAttempts    int
 	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
+	MaxRetryBudget int
+	JitterFraction float64
 	Parser         Parser
 	Hooks          []ParseHook
 }
@@ -47,11 +53,35 @@ type Collector struct {
 	client         Client
 	maxAttempts    int
 	initialBackoff time.Duration
+	maxBackoff     time.Duration
+	maxRetryBudget int
+	jitterFraction float64
 	parser         Parser
 	hooks          []ParseHook
 	now            func() time.Time
 	sleep          func(time.Duration)
+	randFloat64    func() float64
+
+	metrics struct {
+		throttledResponses  atomic.Uint64
+		retryAttempts       atomic.Uint64
+		retryBudgetExceeded atomic.Uint64
+		throttleDrops       atomic.Uint64
+	}
 }
+
+type CollectorMetrics struct {
+	ThrottledResponses  uint64 `json:"throttled_responses"`
+	RetryAttempts       uint64 `json:"retry_attempts"`
+	RetryBudgetExceeded uint64 `json:"retry_budget_exceeded"`
+	ThrottleDrops       uint64 `json:"throttle_drops"`
+}
+
+type retryState struct {
+	remainingBudget int
+}
+
+var ErrRetryBudgetExhausted = errors.New("cloudwatch logs retry budget exhausted")
 
 func NewCollector(client Client, cfg CollectorConfig) *Collector {
 	maxAttempts := cfg.MaxAttempts
@@ -62,6 +92,30 @@ func NewCollector(client Client, cfg CollectorConfig) *Collector {
 	initialBackoff := cfg.InitialBackoff
 	if initialBackoff <= 0 {
 		initialBackoff = 250 * time.Millisecond
+	}
+
+	maxBackoff := cfg.MaxBackoff
+	if maxBackoff <= 0 {
+		maxBackoff = 5 * time.Second
+	}
+	if maxBackoff < initialBackoff {
+		maxBackoff = initialBackoff
+	}
+
+	maxRetryBudget := cfg.MaxRetryBudget
+	if maxRetryBudget <= 0 {
+		maxRetryBudget = maxAttempts - 1
+	}
+	if maxRetryBudget < 0 {
+		maxRetryBudget = 0
+	}
+
+	jitterFraction := cfg.JitterFraction
+	if jitterFraction <= 0 {
+		jitterFraction = 0.2
+	}
+	if jitterFraction > 1 {
+		jitterFraction = 1
 	}
 
 	parser := cfg.Parser
@@ -75,10 +129,14 @@ func NewCollector(client Client, cfg CollectorConfig) *Collector {
 		client:         client,
 		maxAttempts:    maxAttempts,
 		initialBackoff: initialBackoff,
+		maxBackoff:     maxBackoff,
+		maxRetryBudget: maxRetryBudget,
+		jitterFraction: jitterFraction,
 		parser:         parser,
 		hooks:          hooks,
 		now:            time.Now,
 		sleep:          time.Sleep,
+		randFloat64:    rand.Float64,
 	}
 }
 
@@ -104,6 +162,9 @@ func (c *Collector) Collect(ctx context.Context, req CollectRequest) ([]LogRecor
 	records := make([]LogRecord, 0)
 	var nextToken string
 	seenToken := map[string]struct{}{}
+	retryState := retryState{
+		remainingBudget: c.maxRetryBudget,
+	}
 
 	for {
 		input := &cloudwatchlogs.FilterLogEventsInput{
@@ -121,7 +182,7 @@ func (c *Collector) Collect(ctx context.Context, req CollectRequest) ([]LogRecor
 			input.NextToken = awsString(nextToken)
 		}
 
-		output, err := c.filterWithRetry(ctx, input)
+		output, err := c.filterWithRetry(ctx, input, &retryState)
 		if err != nil {
 			return nil, err
 		}
@@ -176,7 +237,7 @@ func (c *Collector) toLogRecords(logGroupName string, events []types.FilteredLog
 	return records
 }
 
-func (c *Collector) filterWithRetry(ctx context.Context, input *cloudwatchlogs.FilterLogEventsInput) (*cloudwatchlogs.FilterLogEventsOutput, error) {
+func (c *Collector) filterWithRetry(ctx context.Context, input *cloudwatchlogs.FilterLogEventsInput, state *retryState) (*cloudwatchlogs.FilterLogEventsOutput, error) {
 	backoff := c.initialBackoff
 
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
@@ -185,15 +246,86 @@ func (c *Collector) filterWithRetry(ctx context.Context, input *cloudwatchlogs.F
 			return output, nil
 		}
 
-		if !isThrottlingError(err) || attempt == c.maxAttempts {
+		if !isThrottlingError(err) {
 			return nil, err
 		}
 
-		c.sleep(backoff)
-		backoff *= 2
+		c.metrics.throttledResponses.Add(1)
+		if attempt == c.maxAttempts {
+			c.metrics.throttleDrops.Add(1)
+			return nil, err
+		}
+
+		if state.remainingBudget <= 0 {
+			c.metrics.retryBudgetExceeded.Add(1)
+			c.metrics.throttleDrops.Add(1)
+			return nil, fmt.Errorf("%w: %v", ErrRetryBudgetExhausted, err)
+		}
+
+		state.remainingBudget--
+		c.metrics.retryAttempts.Add(1)
+
+		delay := c.jitteredBackoff(backoff)
+		if err := c.waitBackoff(ctx, delay); err != nil {
+			return nil, err
+		}
+		backoff = c.nextBackoff(backoff)
 	}
 
 	return nil, errors.New("unreachable retry state")
+}
+
+func (c *Collector) Metrics() CollectorMetrics {
+	return CollectorMetrics{
+		ThrottledResponses:  c.metrics.throttledResponses.Load(),
+		RetryAttempts:       c.metrics.retryAttempts.Load(),
+		RetryBudgetExceeded: c.metrics.retryBudgetExceeded.Load(),
+		ThrottleDrops:       c.metrics.throttleDrops.Load(),
+	}
+}
+
+func (c *Collector) jitteredBackoff(base time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	if c.jitterFraction <= 0 {
+		return base
+	}
+
+	jitterScale := (c.randFloat64()*2 - 1) * c.jitterFraction
+	delay := time.Duration(float64(base) * (1 + jitterScale))
+	if delay < 0 {
+		return 0
+	}
+	return delay
+}
+
+func (c *Collector) nextBackoff(current time.Duration) time.Duration {
+	next := current * 2
+	if next <= 0 {
+		return c.maxBackoff
+	}
+	if next > c.maxBackoff {
+		return c.maxBackoff
+	}
+	return next
+}
+
+func (c *Collector) waitBackoff(ctx context.Context, delay time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	c.sleep(delay)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 func isThrottlingError(err error) bool {

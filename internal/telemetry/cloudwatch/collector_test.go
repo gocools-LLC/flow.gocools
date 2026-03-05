@@ -2,6 +2,7 @@ package cloudwatch
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -79,12 +80,107 @@ func TestCollect_RetriesOnThrottling(t *testing.T) {
 	if client.calls != 2 {
 		t.Fatalf("expected 2 API calls due to retry, got %d", client.calls)
 	}
+	metrics := collector.Metrics()
+	if metrics.ThrottledResponses != 1 || metrics.RetryAttempts != 1 {
+		t.Fatalf("unexpected retry metrics: %+v", metrics)
+	}
 
 	if len(points) != 1 {
 		t.Fatalf("expected 1 point, got %d", len(points))
 	}
 	if points[0].ResourceID != "i-123" {
 		t.Fatalf("expected resource i-123, got %q", points[0].ResourceID)
+	}
+}
+
+func TestCollect_StopsWhenRetryBudgetExhausted(t *testing.T) {
+	client := &fakeClient{
+		failuresBeforeSuccess: 10,
+	}
+
+	collector := NewCollector(client, CollectorConfig{
+		MaxAttempts:    8,
+		MaxRetryBudget: 2,
+		InitialBackoff: time.Millisecond,
+		JitterFraction: 0,
+	})
+	collector.sleep = func(time.Duration) {}
+	collector.now = func() time.Time { return time.Date(2026, 3, 5, 0, 5, 0, 0, time.UTC) }
+
+	_, err := collector.Collect(context.Background(), []ResourceTarget{
+		{
+			Kind:       ResourceKindEC2,
+			InstanceID: "i-123",
+		},
+	}, 5*time.Minute)
+	if !errors.Is(err, ErrRetryBudgetExhausted) {
+		t.Fatalf("expected ErrRetryBudgetExhausted, got %v", err)
+	}
+
+	if client.calls != 3 {
+		t.Fatalf("expected 3 API calls from retry budget, got %d", client.calls)
+	}
+
+	metrics := collector.Metrics()
+	if metrics.ThrottledResponses != 3 || metrics.RetryAttempts != 2 || metrics.RetryBudgetExceeded != 1 || metrics.ThrottleDrops != 1 {
+		t.Fatalf("unexpected budget metrics: %+v", metrics)
+	}
+}
+
+func TestCollect_JitteredBackoffApplied(t *testing.T) {
+	client := &fakeClient{
+		output: &cw.GetMetricDataOutput{
+			MetricDataResults: []types.MetricDataResult{
+				{
+					Id:         awsString("m1"),
+					Values:     []float64{1},
+					Timestamps: []time.Time{time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)},
+				},
+			},
+		},
+		failuresBeforeSuccess: 2,
+	}
+
+	collector := NewCollector(client, CollectorConfig{
+		MaxAttempts:    5,
+		MaxRetryBudget: 4,
+		InitialBackoff: 100 * time.Millisecond,
+		MaxBackoff:     500 * time.Millisecond,
+		JitterFraction: 0.5,
+	})
+	collector.now = func() time.Time { return time.Date(2026, 3, 5, 0, 5, 0, 0, time.UTC) }
+
+	randValues := []float64{1, 0}
+	randIndex := 0
+	collector.randFloat64 = func() float64 {
+		value := randValues[randIndex]
+		randIndex++
+		return value
+	}
+
+	delays := make([]time.Duration, 0, 2)
+	collector.sleep = func(delay time.Duration) {
+		delays = append(delays, delay)
+	}
+
+	_, err := collector.Collect(context.Background(), []ResourceTarget{
+		{
+			Kind:       ResourceKindEC2,
+			InstanceID: "i-123",
+		},
+	}, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("collect returned error: %v", err)
+	}
+
+	if len(delays) != 2 {
+		t.Fatalf("expected 2 jittered delays, got %d", len(delays))
+	}
+	if delays[0] != 150*time.Millisecond {
+		t.Fatalf("expected first jittered delay 150ms, got %s", delays[0])
+	}
+	if delays[1] != 100*time.Millisecond {
+		t.Fatalf("expected second jittered delay 100ms, got %s", delays[1])
 	}
 }
 
