@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	internalaws "github.com/gocools-LLC/flow.gocools/internal/aws"
 	"github.com/gocools-LLC/flow.gocools/internal/httpserver"
 )
 
@@ -25,6 +26,27 @@ func main() {
 func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	addr := envOrDefault("FLOW_HTTP_ADDR", ":8080")
+	awsRuntimeConfig := internalaws.RuntimeConfigFromEnv()
+
+	logger.Info(
+		"aws_auth_configuration",
+		"region", awsRuntimeConfig.Session.Region,
+		"role_arn_set", awsRuntimeConfig.Session.RoleARN != "",
+		"session_name", awsRuntimeConfig.Session.SessionName,
+		"external_id_set", awsRuntimeConfig.Session.ExternalID != "",
+		"validate_on_start", awsRuntimeConfig.ValidateOnStart,
+	)
+
+	if awsRuntimeConfig.ValidateOnStart {
+		validateCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := internalaws.ValidateCredentials(validateCtx, awsRuntimeConfig.Session); err != nil {
+			return err
+		}
+		logger.Info("aws_credentials_validation_succeeded")
+	}
+
 	srv := httpserver.New(httpserver.Config{
 		Addr:    addr,
 		Version: version,

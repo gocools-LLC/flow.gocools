@@ -22,6 +22,16 @@ Set a custom listen address with `FLOW_HTTP_ADDR`:
 FLOW_HTTP_ADDR=:9090 go run ./cmd/flow
 ```
 
+Use STS AssumeRole-based AWS auth (optional runtime validation):
+
+```bash
+FLOW_AWS_REGION=us-east-1 \
+FLOW_AWS_ROLE_ARN=arn:aws:iam::123456789012:role/flow-observer \
+FLOW_AWS_SESSION_NAME=flow-session \
+FLOW_AWS_VALIDATE_ON_START=true \
+go run ./cmd/flow
+```
+
 ## Repository Layout
 
 - `cmd/flow`: CLI entrypoint.
