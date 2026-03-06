@@ -25,7 +25,7 @@ func TestStartTimelineIngestionDisabledMode(t *testing.T) {
 	}
 }
 
-func TestStartTimelineIngestionCloudWatchModeRequiresRegion(t *testing.T) {
+func TestStartTimelineIngestionCloudWatchLogsModeRequiresRegion(t *testing.T) {
 	err := startTimelineIngestion(
 		context.Background(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -40,6 +40,70 @@ func TestStartTimelineIngestionCloudWatchModeRequiresRegion(t *testing.T) {
 		t.Fatal("expected missing region error")
 	}
 	if !strings.Contains(err.Error(), "FLOW_AWS_REGION or AWS_REGION") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartTimelineIngestionCloudWatchMetricsModeRequiresRegion(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{},
+		ingestion.RuntimeConfig{
+			Mode:             ingestion.ModeCloudWatchMetric,
+			MetricTargetsRaw: "ec2:i-123",
+		},
+		timeline.NewInMemoryService(nil),
+	)
+	if err == nil {
+		t.Fatal("expected missing region error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_AWS_REGION or AWS_REGION") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartTimelineIngestionCloudWatchMetricsModeRequiresTargets(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{
+			Session: internalaws.SessionConfig{
+				Region: "us-east-1",
+			},
+		},
+		ingestion.RuntimeConfig{
+			Mode: ingestion.ModeCloudWatchMetric,
+		},
+		timeline.NewInMemoryService(nil),
+	)
+	if err == nil {
+		t.Fatal("expected missing targets error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_CW_METRIC_TARGETS") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartTimelineIngestionCloudWatchMetricsModeRejectsBadTargets(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{
+			Session: internalaws.SessionConfig{
+				Region: "us-east-1",
+			},
+		},
+		ingestion.RuntimeConfig{
+			Mode:             ingestion.ModeCloudWatchMetric,
+			MetricTargetsRaw: "bad-target",
+		},
+		timeline.NewInMemoryService(nil),
+	)
+	if err == nil {
+		t.Fatal("expected malformed targets error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_CW_METRIC_TARGETS") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

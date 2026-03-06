@@ -47,6 +47,17 @@ go run ./cmd/flow
 
 `FLOW_INGEST_MODE` defaults to `disabled` for local/smoke runs.
 
+Enable CloudWatch Metrics -> incident timeline saturation alerts:
+
+```bash
+FLOW_INGEST_MODE=cloudwatch_metrics \
+FLOW_CW_METRIC_TARGETS="ec2:i-0123456789abcdef0,ecs:dev-cluster/api-service" \
+FLOW_CW_METRIC_UTIL_WARN=70 \
+FLOW_CW_METRIC_UTIL_ERROR=90 \
+FLOW_AWS_REGION=us-east-1 \
+go run ./cmd/flow
+```
+
 Run the ingestion integration harness:
 
 ```bash
