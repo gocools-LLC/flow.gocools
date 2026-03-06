@@ -35,6 +35,16 @@ func TestRuntimeConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigFromEnvFallsBackToAWSRegion(t *testing.T) {
+	t.Setenv("FLOW_AWS_REGION", "")
+	t.Setenv("AWS_REGION", "us-west-2")
+
+	cfg := RuntimeConfigFromEnv()
+	if cfg.Session.Region != "us-west-2" {
+		t.Fatalf("expected region fallback from AWS_REGION, got %q", cfg.Session.Region)
+	}
+}
+
 func TestValidateCredentialsWithStaticProvider(t *testing.T) {
 	err := ValidateCredentials(context.Background(), SessionConfig{
 		Region: "us-east-1",

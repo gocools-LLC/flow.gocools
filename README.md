@@ -34,6 +34,19 @@ FLOW_AWS_VALIDATE_ON_START=true \
 go run ./cmd/flow
 ```
 
+Enable CloudWatch Logs -> incident timeline ingestion:
+
+```bash
+FLOW_INGEST_MODE=cloudwatch_logs \
+FLOW_CW_LOG_GROUP=/aws/ecs/dev-api \
+FLOW_INGEST_INTERVAL=30s \
+FLOW_INGEST_WINDOW=5m \
+FLOW_AWS_REGION=us-east-1 \
+go run ./cmd/flow
+```
+
+`FLOW_INGEST_MODE` defaults to `disabled` for local/smoke runs.
+
 Run the ingestion integration harness:
 
 ```bash

@@ -20,7 +20,7 @@ trap cleanup EXIT
 cd "${ROOT_DIR}"
 
 echo "Starting Flow smoke target on ${BASE_URL}..."
-FLOW_HTTP_ADDR=":${PORT}" go run ./cmd/flow >"${LOG_PATH}" 2>&1 &
+FLOW_HTTP_ADDR=":${PORT}" FLOW_INGEST_MODE=disabled go run ./cmd/flow >"${LOG_PATH}" 2>&1 &
 FLOW_PID=$!
 
 READY=0

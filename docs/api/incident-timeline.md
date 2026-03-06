@@ -4,6 +4,15 @@
 
 `GET /api/v1/incidents/timeline`
 
+By default the service runs with an empty in-memory timeline. To ingest live events,
+start Flow with:
+
+```bash
+FLOW_INGEST_MODE=cloudwatch_logs
+FLOW_CW_LOG_GROUP=/aws/ecs/<service>
+FLOW_AWS_REGION=<region>
+```
+
 ## Query Parameters
 
 - `start` (optional, RFC3339 UTC): inclusive start timestamp
@@ -47,4 +56,3 @@ Returned events are deterministically ordered:
 
 1. `timestamp` descending
 2. `id` ascending when timestamps are equal
-

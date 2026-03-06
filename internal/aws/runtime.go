@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 )
@@ -15,9 +16,11 @@ type RuntimeConfig struct {
 }
 
 func RuntimeConfigFromEnv() RuntimeConfig {
+	region := envOrDefault("FLOW_AWS_REGION", os.Getenv("AWS_REGION"))
+
 	return RuntimeConfig{
 		Session: SessionConfig{
-			Region:      os.Getenv("FLOW_AWS_REGION"),
+			Region:      region,
 			RoleARN:     os.Getenv("FLOW_AWS_ROLE_ARN"),
 			SessionName: envOrDefault("FLOW_AWS_SESSION_NAME", "flow-session"),
 			ExternalID:  os.Getenv("FLOW_AWS_EXTERNAL_ID"),
@@ -45,7 +48,7 @@ func ValidateCredentials(ctx context.Context, session SessionConfig, optFns ...f
 
 func envOrDefault(key string, fallback string) string {
 	value := os.Getenv(key)
-	if value == "" {
+	if strings.TrimSpace(value) == "" {
 		return fallback
 	}
 	return value

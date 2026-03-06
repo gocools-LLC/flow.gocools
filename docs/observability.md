@@ -18,6 +18,13 @@ CloudWatch ingestion collectors also expose in-process retry metrics via `Collec
 - `retry_budget_exceeded`
 - `throttle_drops`
 
+Timeline ingestion runtime toggles:
+
+- `FLOW_INGEST_MODE=disabled` (default)
+- `FLOW_INGEST_MODE=cloudwatch_logs`
+- `FLOW_CW_LOG_GROUP=/aws/...` (required in `cloudwatch_logs` mode)
+- `FLOW_INGEST_INTERVAL`, `FLOW_INGEST_WINDOW`, `FLOW_INGEST_TIMEOUT`
+
 ## Tracing
 
 Flow emits OpenTelemetry spans for inbound HTTP requests when configured:
