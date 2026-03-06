@@ -15,6 +15,7 @@ go run ./cmd/flow
 curl -s localhost:8080/healthz
 curl -s localhost:8080/readyz
 curl -s localhost:8080/metrics
+make smoke-local
 ```
 
 Set a custom listen address with `FLOW_HTTP_ADDR`:

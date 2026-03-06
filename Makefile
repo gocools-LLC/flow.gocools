@@ -1,6 +1,6 @@
 BINARY := flow
 
-.PHONY: build test test-integration run fmt lint
+.PHONY: build test test-integration smoke-local run fmt lint
 
 build:
 	go build ./...
@@ -10,6 +10,9 @@ test:
 
 test-integration:
 	go test -v ./test/...
+
+smoke-local:
+	./scripts/smoke-local.sh
 
 run:
 	go run ./cmd/$(BINARY)

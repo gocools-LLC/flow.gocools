@@ -25,3 +25,6 @@ jobs:
 
       - name: Integration Harness
         run: make test-integration
+
+      - name: API Smoke
+        run: make smoke-local

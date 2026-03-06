@@ -14,9 +14,8 @@ Initial milestone release target: `v0.1.0`.
 
 - [ ] `go test ./...`
 - [ ] `make test-integration`
+- [ ] `make smoke-local`
 - [ ] `go build ./...`
-- [ ] verify `/healthz` and `/readyz` on local run
-- [ ] verify `/api/v1/incidents/timeline` response contract
 
 ## Release Artifacts
 
@@ -44,4 +43,3 @@ GitHub Actions workflow: `.github/workflows/release.yml`.
 - [ ] publish release notes
 - [ ] verify downloadable artifacts
 - [ ] create `v0.1.1` patch milestone for follow-ups
-
