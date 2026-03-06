@@ -19,9 +19,11 @@ import (
 	"github.com/gocools-LLC/flow.gocools/internal/httpserver"
 	"github.com/gocools-LLC/flow.gocools/internal/ingestion"
 	"github.com/gocools-LLC/flow.gocools/internal/observability"
+	telemetryarchive "github.com/gocools-LLC/flow.gocools/internal/telemetry/archive"
 	"github.com/gocools-LLC/flow.gocools/internal/telemetry/cloudwatch"
 	"github.com/gocools-LLC/flow.gocools/internal/telemetry/cloudwatchlogs"
 	"github.com/gocools-LLC/flow.gocools/internal/telemetry/signals"
+	"github.com/gocools-LLC/flow.gocools/internal/telemetry/storage"
 )
 
 var version = "dev"
@@ -38,6 +40,7 @@ func run() error {
 	addr := envOrDefault("FLOW_HTTP_ADDR", ":8080")
 	awsRuntimeConfig := internalaws.RuntimeConfigFromEnv()
 	ingestionRuntimeConfig := ingestion.RuntimeConfigFromEnv()
+	archiveRuntimeConfig := telemetryarchive.RuntimeConfigFromEnv()
 	ingestionMode := ingestionRuntimeConfig.NormalizedMode()
 	metricTargets, _ := ingestionRuntimeConfig.MetricTargets()
 
@@ -58,6 +61,15 @@ func run() error {
 	if err := ingestionRuntimeConfig.Validate(); err != nil {
 		return err
 	}
+	if err := archiveRuntimeConfig.Validate(); err != nil {
+		return err
+	}
+
+	logger.Info(
+		"telemetry_archive_configuration",
+		"mode", archiveRuntimeConfig.NormalizedMode(),
+		"local_dir", archiveRuntimeConfig.ResolvedLocalDir(),
+	)
 
 	logger.Info(
 		"aws_auth_configuration",
@@ -92,8 +104,13 @@ func run() error {
 		"max_logs", signalStoreConfig.MaxLogs,
 	)
 	signalStore := signals.NewInMemoryStore(signalStoreConfig)
+	archiveSink, err := buildArchiveSink(logger, archiveRuntimeConfig)
+	if err != nil {
+		return err
+	}
+	telemetrySink := newTelemetrySignalFanout(signalStore, archiveSink)
 	correlationService := correlation.NewService(signalStore)
-	if err := startTimelineIngestion(runCtx, logger, awsRuntimeConfig, ingestionRuntimeConfig, timelineService, signalStore); err != nil {
+	if err := startTimelineIngestion(runCtx, logger, awsRuntimeConfig, ingestionRuntimeConfig, timelineService, telemetrySink); err != nil {
 		return err
 	}
 
@@ -190,6 +207,40 @@ func startTimelineIngestion(
 type telemetrySignalStore interface {
 	AddLogRecords(records ...cloudwatchlogs.LogRecord)
 	AddMetricPoints(points ...cloudwatch.MetricPoint)
+}
+
+type telemetrySignalFanout struct {
+	sinks []telemetrySignalStore
+}
+
+func newTelemetrySignalFanout(sinks ...telemetrySignalStore) telemetrySignalStore {
+	flat := make([]telemetrySignalStore, 0, len(sinks))
+	for _, sink := range sinks {
+		if sink == nil {
+			continue
+		}
+		flat = append(flat, sink)
+	}
+	switch len(flat) {
+	case 0:
+		return nil
+	case 1:
+		return flat[0]
+	default:
+		return &telemetrySignalFanout{sinks: flat}
+	}
+}
+
+func (f *telemetrySignalFanout) AddLogRecords(records ...cloudwatchlogs.LogRecord) {
+	for _, sink := range f.sinks {
+		sink.AddLogRecords(records...)
+	}
+}
+
+func (f *telemetrySignalFanout) AddMetricPoints(points ...cloudwatch.MetricPoint) {
+	for _, sink := range f.sinks {
+		sink.AddMetricPoints(points...)
+	}
 }
 
 func startCloudWatchLogIngestion(
@@ -301,4 +352,16 @@ func envIntOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func buildArchiveSink(logger *slog.Logger, cfg telemetryarchive.RuntimeConfig) (telemetrySignalStore, error) {
+	switch cfg.NormalizedMode() {
+	case telemetryarchive.ModeDisabled:
+		return nil, nil
+	case telemetryarchive.ModeLocal:
+		store := storage.NewLocalStore(cfg.ResolvedLocalDir())
+		return telemetryarchive.NewSink(logger, store), nil
+	default:
+		return nil, fmt.Errorf("unsupported FLOW_TELEMETRY_ARCHIVE_MODE: %q", cfg.Mode)
+	}
 }

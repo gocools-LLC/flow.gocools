@@ -29,6 +29,7 @@ Timeline ingestion runtime toggles:
 - `FLOW_CW_METRIC_UTIL_WARN` and `FLOW_CW_METRIC_UTIL_ERROR` for utilization thresholds
 - `FLOW_INGEST_INTERVAL`, `FLOW_INGEST_WINDOW`, `FLOW_INGEST_TIMEOUT`
 - `FLOW_SIGNAL_MAX_METRICS`, `FLOW_SIGNAL_MAX_LOGS` for in-memory correlation buffer capacity
+- `FLOW_TELEMETRY_ARCHIVE_MODE=disabled|local` and `FLOW_TELEMETRY_ARCHIVE_LOCAL_DIR` for optional persisted telemetry archive
 
 ## Tracing
 

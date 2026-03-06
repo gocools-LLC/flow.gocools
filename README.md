@@ -68,6 +68,14 @@ FLOW_AWS_REGION=us-east-1 \
 go run ./cmd/flow
 ```
 
+Enable local telemetry archive sink (optional):
+
+```bash
+FLOW_TELEMETRY_ARCHIVE_MODE=local \
+FLOW_TELEMETRY_ARCHIVE_LOCAL_DIR=./dist/telemetry \
+go run ./cmd/flow
+```
+
 Run the ingestion integration harness:
 
 ```bash
