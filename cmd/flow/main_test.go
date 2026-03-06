@@ -19,6 +19,7 @@ func TestStartTimelineIngestionDisabledMode(t *testing.T) {
 		internalaws.RuntimeConfig{},
 		ingestion.RuntimeConfig{Mode: ingestion.ModeDisabled},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected disabled mode to succeed, got %v", err)
@@ -35,6 +36,7 @@ func TestStartTimelineIngestionCloudWatchLogsModeRequiresRegion(t *testing.T) {
 			LogGroupName: "/aws/ecs/dev",
 		},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected missing region error")
@@ -54,6 +56,7 @@ func TestStartTimelineIngestionCloudWatchMetricsModeRequiresRegion(t *testing.T)
 			MetricTargetsRaw: "ec2:i-123",
 		},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected missing region error")
@@ -76,6 +79,7 @@ func TestStartTimelineIngestionCloudWatchMetricsModeRequiresTargets(t *testing.T
 			Mode: ingestion.ModeCloudWatchMetric,
 		},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected missing targets error")
@@ -99,6 +103,7 @@ func TestStartTimelineIngestionCloudWatchMetricsModeRejectsBadTargets(t *testing
 			MetricTargetsRaw: "bad-target",
 		},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected malformed targets error")
@@ -115,6 +120,7 @@ func TestStartTimelineIngestionRejectsUnknownMode(t *testing.T) {
 		internalaws.RuntimeConfig{},
 		ingestion.RuntimeConfig{Mode: "unknown"},
 		timeline.NewInMemoryService(nil),
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected unknown mode error")

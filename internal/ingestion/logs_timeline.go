@@ -24,11 +24,16 @@ type timelineAppender interface {
 	AddEvents(events ...timeline.Event)
 }
 
+type logRecordAppender interface {
+	AddLogRecords(records ...cloudwatchlogs.LogRecord)
+}
+
 type LogsTimelineIngestor struct {
 	logger    *slog.Logger
 	cfg       RuntimeConfig
 	collector logCollector
 	timeline  timelineAppender
+	logSink   logRecordAppender
 
 	now     func() time.Time
 	lastEnd time.Time
@@ -48,6 +53,11 @@ func NewLogsTimelineIngestor(logger *slog.Logger, cfg RuntimeConfig, collector l
 		now:       time.Now,
 		seenIDs:   map[string]time.Time{},
 	}
+}
+
+func (i *LogsTimelineIngestor) WithLogRecordSink(sink logRecordAppender) *LogsTimelineIngestor {
+	i.logSink = sink
+	return i
 }
 
 func (i *LogsTimelineIngestor) Run(ctx context.Context) {
@@ -102,12 +112,14 @@ func (i *LogsTimelineIngestor) ingestOnce(ctx context.Context) error {
 	}
 
 	events := make([]timeline.Event, 0, len(records))
+	addedRecords := make([]cloudwatchlogs.LogRecord, 0, len(records))
 	for _, record := range records {
 		id := eventID(record)
 		if _, exists := i.seenIDs[id]; exists {
 			continue
 		}
 		i.seenIDs[id] = end
+		addedRecords = append(addedRecords, record)
 
 		events = append(events, timeline.Event{
 			ID:            id,
@@ -124,6 +136,9 @@ func (i *LogsTimelineIngestor) ingestOnce(ctx context.Context) error {
 	}
 
 	i.timeline.AddEvents(events...)
+	if i.logSink != nil {
+		i.logSink.AddLogRecords(addedRecords...)
+	}
 	i.logger.Info(
 		"cloudwatch_logs_ingested",
 		"log_group", i.cfg.LogGroupName,

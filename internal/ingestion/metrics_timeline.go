@@ -19,12 +19,17 @@ type metricCollector interface {
 	Collect(ctx context.Context, targets []cloudwatch.ResourceTarget, window time.Duration) ([]cloudwatch.MetricPoint, error)
 }
 
+type metricPointAppender interface {
+	AddMetricPoints(points ...cloudwatch.MetricPoint)
+}
+
 type MetricsTimelineIngestor struct {
-	logger    *slog.Logger
-	cfg       RuntimeConfig
-	targets   []cloudwatch.ResourceTarget
-	collector metricCollector
-	timeline  timelineAppender
+	logger     *slog.Logger
+	cfg        RuntimeConfig
+	targets    []cloudwatch.ResourceTarget
+	collector  metricCollector
+	timeline   timelineAppender
+	metricSink metricPointAppender
 
 	now     func() time.Time
 	lastEnd time.Time
@@ -54,6 +59,11 @@ func NewMetricsTimelineIngestor(
 		now:       time.Now,
 		seenIDs:   map[string]time.Time{},
 	}
+}
+
+func (i *MetricsTimelineIngestor) WithMetricPointSink(sink metricPointAppender) *MetricsTimelineIngestor {
+	i.metricSink = sink
+	return i
 }
 
 func (i *MetricsTimelineIngestor) Run(ctx context.Context) {
@@ -95,6 +105,7 @@ func (i *MetricsTimelineIngestor) ingestOnce(ctx context.Context) error {
 	}
 
 	events := make([]timeline.Event, 0, len(points))
+	addedPoints := make([]cloudwatch.MetricPoint, 0, len(points))
 	for _, point := range points {
 		severity, emit := metricSeverity(point, i.cfg.MetricWarnThreshold(), i.cfg.MetricErrorThreshold())
 		if !emit {
@@ -106,6 +117,7 @@ func (i *MetricsTimelineIngestor) ingestOnce(ctx context.Context) error {
 			continue
 		}
 		i.seenIDs[id] = now
+		addedPoints = append(addedPoints, point)
 
 		timestamp := point.Timestamp.UTC()
 		if timestamp.IsZero() {
@@ -126,6 +138,9 @@ func (i *MetricsTimelineIngestor) ingestOnce(ctx context.Context) error {
 	}
 
 	i.timeline.AddEvents(events...)
+	if i.metricSink != nil {
+		i.metricSink.AddMetricPoints(addedPoints...)
+	}
 	i.lastEnd = now
 	i.logger.Info(
 		"cloudwatch_metrics_ingested",

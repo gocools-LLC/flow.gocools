@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
+	"github.com/gocools-LLC/flow.gocools/internal/correlation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
@@ -17,10 +18,15 @@ import (
 )
 
 type Config struct {
-	Addr            string
-	Version         string
-	Logger          *slog.Logger
-	TimelineService timeline.Service
+	Addr               string
+	Version            string
+	Logger             *slog.Logger
+	TimelineService    timeline.Service
+	CorrelationService correlationQueryService
+}
+
+type correlationQueryService interface {
+	QueryGraph(query correlation.Query) (correlation.Result, error)
 }
 
 type statusResponse struct {
@@ -60,6 +66,7 @@ func New(cfg Config) *http.Server {
 	mux.HandleFunc("/healthz", statusHandler(version, "ok"))
 	mux.HandleFunc("/readyz", statusHandler(version, "ready"))
 	mux.HandleFunc("/api/v1/incidents/timeline", incidentTimelineHandler(timelineService))
+	mux.HandleFunc("/api/v1/telemetry/correlation", telemetryCorrelationHandler(cfg.CorrelationService))
 	mux.Handle("/metrics", promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}))
 
 	return &http.Server{
@@ -103,6 +110,56 @@ func incidentTimelineHandler(service timeline.Service) http.HandlerFunc {
 			End:      end,
 			Page:     page,
 			PageSize: pageSize,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func telemetryCorrelationHandler(service correlationQueryService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
+			return
+		}
+
+		start, err := parseRFC3339Query(r, "start")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid start query parameter"})
+			return
+		}
+		end, err := parseRFC3339Query(r, "end")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid end query parameter"})
+			return
+		}
+		maxSkewSeconds, err := parseIntQuery(r, "max_skew_seconds")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid max_skew_seconds query parameter"})
+			return
+		}
+
+		maxSkew := time.Duration(0)
+		if maxSkewSeconds > 0 {
+			maxSkew = time.Duration(maxSkewSeconds) * time.Second
+		}
+
+		if service == nil {
+			writeJSON(w, http.StatusOK, correlation.Result{
+				Nodes: []correlation.Node{},
+				Edges: []correlation.Edge{},
+			})
+			return
+		}
+
+		result, err := service.QueryGraph(correlation.Query{
+			Start:   start,
+			End:     end,
+			MaxSkew: maxSkew,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})

@@ -91,6 +91,7 @@ gocools:owner
 - [Telemetry Correlation Model](docs/telemetry-correlation-model.md)
 - [Telemetry Storage](docs/telemetry-storage.md)
 - [Incident Timeline API](docs/api/incident-timeline.md)
+- [Telemetry Correlation API](docs/api/telemetry-correlation.md)
 - [Service Observability](docs/observability.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Release Notes v0.1.1](docs/releases/v0.1.1.md)

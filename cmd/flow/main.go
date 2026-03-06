@@ -14,11 +14,13 @@ import (
 
 	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
 	internalaws "github.com/gocools-LLC/flow.gocools/internal/aws"
+	"github.com/gocools-LLC/flow.gocools/internal/correlation"
 	"github.com/gocools-LLC/flow.gocools/internal/httpserver"
 	"github.com/gocools-LLC/flow.gocools/internal/ingestion"
 	"github.com/gocools-LLC/flow.gocools/internal/observability"
 	"github.com/gocools-LLC/flow.gocools/internal/telemetry/cloudwatch"
 	"github.com/gocools-LLC/flow.gocools/internal/telemetry/cloudwatchlogs"
+	"github.com/gocools-LLC/flow.gocools/internal/telemetry/signals"
 )
 
 var version = "dev"
@@ -79,7 +81,9 @@ func run() error {
 	defer runCancel()
 
 	timelineService := timeline.NewInMemoryService(nil)
-	if err := startTimelineIngestion(runCtx, logger, awsRuntimeConfig, ingestionRuntimeConfig, timelineService); err != nil {
+	signalStore := signals.NewInMemoryStore(signals.Config{})
+	correlationService := correlation.NewService(signalStore)
+	if err := startTimelineIngestion(runCtx, logger, awsRuntimeConfig, ingestionRuntimeConfig, timelineService, signalStore); err != nil {
 		return err
 	}
 
@@ -96,10 +100,11 @@ func run() error {
 	}()
 
 	srv := httpserver.New(httpserver.Config{
-		Addr:            addr,
-		Version:         version,
-		Logger:          logger,
-		TimelineService: timelineService,
+		Addr:               addr,
+		Version:            version,
+		Logger:             logger,
+		TimelineService:    timelineService,
+		CorrelationService: correlationService,
 	})
 
 	serverErrCh := make(chan error, 1)
@@ -139,6 +144,7 @@ func startTimelineIngestion(
 	awsConfig internalaws.RuntimeConfig,
 	runtimeConfig ingestion.RuntimeConfig,
 	timelineService *timeline.InMemoryService,
+	signalStore telemetrySignalStore,
 ) error {
 	mode := runtimeConfig.NormalizedMode()
 	switch mode {
@@ -166,6 +172,9 @@ func startTimelineIngestion(
 			},
 		})
 		ingestor := ingestion.NewLogsTimelineIngestor(logger, runtimeConfig, collector, timelineService)
+		if signalStore != nil {
+			ingestor.WithLogRecordSink(signalStore)
+		}
 		go ingestor.Run(ctx)
 
 		logger.Info(
@@ -203,6 +212,9 @@ func startTimelineIngestion(
 
 		collector := cloudwatch.NewCollector(client, cloudwatch.CollectorConfig{})
 		ingestor := ingestion.NewMetricsTimelineIngestor(logger, runtimeConfig, targets, collector, timelineService)
+		if signalStore != nil {
+			ingestor.WithMetricPointSink(signalStore)
+		}
 		go ingestor.Run(ctx)
 
 		logger.Info(
@@ -219,6 +231,11 @@ func startTimelineIngestion(
 	default:
 		return fmt.Errorf("unsupported FLOW_INGEST_MODE: %q", runtimeConfig.Mode)
 	}
+}
+
+type telemetrySignalStore interface {
+	AddLogRecords(records ...cloudwatchlogs.LogRecord)
+	AddMetricPoints(points ...cloudwatch.MetricPoint)
 }
 
 func envOrDefault(key, fallback string) string {

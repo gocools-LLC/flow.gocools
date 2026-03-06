@@ -43,6 +43,7 @@ healthz="$(cat "${TMP_DIR}/healthz.json")"
 readyz="$(curl -fsS "${BASE_URL}/readyz")"
 metrics="$(curl -fsS "${BASE_URL}/metrics")"
 timeline="$(curl -fsS "${BASE_URL}/api/v1/incidents/timeline?stack_id=dev-stack&environment=dev&start=2026-03-05T00:00:00Z&end=2026-03-05T00:05:00Z")"
+correlation="$(curl -fsS "${BASE_URL}/api/v1/telemetry/correlation?start=2026-03-05T00:00:00Z&end=2026-03-05T00:05:00Z&max_skew_seconds=120")"
 
 echo "${healthz}" | grep -q '"status":"ok"' || {
   echo "unexpected /healthz response: ${healthz}"
@@ -58,6 +59,10 @@ echo "${metrics}" | grep -q 'flow_http_requests_total' || {
 }
 echo "${timeline}" | grep -q '"events"' || {
   echo "unexpected timeline API response: ${timeline}"
+  exit 1
+}
+echo "${correlation}" | grep -q '"nodes"' || {
+  echo "unexpected correlation API response: ${correlation}"
   exit 1
 }
 

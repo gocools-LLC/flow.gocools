@@ -48,6 +48,14 @@ func (f *fakeTimeline) AddEvents(events ...timeline.Event) {
 	f.events = append(f.events, events...)
 }
 
+type fakeLogRecordSink struct {
+	records []cloudwatchlogs.LogRecord
+}
+
+func (f *fakeLogRecordSink) AddLogRecords(records ...cloudwatchlogs.LogRecord) {
+	f.records = append(f.records, records...)
+}
+
 func TestLogsTimelineIngestorIngestOnceDedupesEventIDsAcrossPolls(t *testing.T) {
 	baseTime := time.Date(2026, 3, 6, 8, 0, 0, 0, time.UTC)
 	collector := &fakeLogsCollector{
@@ -91,6 +99,7 @@ func TestLogsTimelineIngestorIngestOnceDedupesEventIDsAcrossPolls(t *testing.T) 
 		},
 	}
 	timelineSink := &fakeTimeline{}
+	logSink := &fakeLogRecordSink{}
 
 	ingestor := NewLogsTimelineIngestor(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -102,7 +111,7 @@ func TestLogsTimelineIngestorIngestOnceDedupesEventIDsAcrossPolls(t *testing.T) 
 		},
 		collector,
 		timelineSink,
-	)
+	).WithLogRecordSink(logSink)
 
 	nowCalls := 0
 	ingestor.now = func() time.Time {
@@ -119,6 +128,9 @@ func TestLogsTimelineIngestorIngestOnceDedupesEventIDsAcrossPolls(t *testing.T) 
 
 	if len(timelineSink.events) != 3 {
 		t.Fatalf("expected 3 timeline events after dedupe, got %d", len(timelineSink.events))
+	}
+	if len(logSink.records) != 3 {
+		t.Fatalf("expected 3 stored log records after dedupe, got %d", len(logSink.records))
 	}
 	if timelineSink.events[0].ID != "event-1" {
 		t.Fatalf("expected first event id event-1, got %s", timelineSink.events[0].ID)

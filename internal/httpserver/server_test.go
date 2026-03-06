@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gocools-LLC/flow.gocools/internal/analyzer/timeline"
+	"github.com/gocools-LLC/flow.gocools/internal/correlation"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -144,6 +145,88 @@ func TestIncidentTimelineEndpointBadStartReturns400(t *testing.T) {
 	}).Handler
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/incidents/timeline?start=bad-time", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
+	}
+}
+
+type fakeCorrelationService struct {
+	result correlation.Result
+	err    error
+	query  correlation.Query
+	calls  int
+}
+
+func (f *fakeCorrelationService) QueryGraph(query correlation.Query) (correlation.Result, error) {
+	f.calls++
+	f.query = query
+	if f.err != nil {
+		return correlation.Result{}, f.err
+	}
+	return f.result, nil
+}
+
+func TestTelemetryCorrelationEndpointReturnsGraphPayload(t *testing.T) {
+	correlationService := &fakeCorrelationService{
+		result: correlation.Result{
+			Nodes: []correlation.Node{
+				{ID: "resource:i-123", Kind: "resource"},
+				{ID: "log:event-1", Kind: "log"},
+			},
+			Edges: []correlation.Edge{
+				{From: "resource:i-123", To: "log:event-1", Kind: "emits_log"},
+			},
+			MetricCount: 3,
+			LogCount:    2,
+		},
+	}
+
+	handler := New(Config{
+		Version:            "test-version",
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		CorrelationService: correlationService,
+	}).Handler
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/telemetry/correlation?start=2026-03-05T10:00:00Z&end=2026-03-05T10:05:00Z&max_skew_seconds=120",
+		nil,
+	)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+	if correlationService.calls != 1 {
+		t.Fatalf("expected one service call, got %d", correlationService.calls)
+	}
+	if correlationService.query.MaxSkew != 120*time.Second {
+		t.Fatalf("expected max skew 120s, got %s", correlationService.query.MaxSkew)
+	}
+
+	var payload correlation.Result
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode payload: %v", err)
+	}
+	if payload.MetricCount != 3 || payload.LogCount != 2 {
+		t.Fatalf("unexpected counts in payload: %+v", payload)
+	}
+	if len(payload.Nodes) != 2 || len(payload.Edges) != 1 {
+		t.Fatalf("unexpected graph payload size: nodes=%d edges=%d", len(payload.Nodes), len(payload.Edges))
+	}
+}
+
+func TestTelemetryCorrelationEndpointInvalidMaxSkewReturns400(t *testing.T) {
+	handler := New(Config{
+		Version: "test-version",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Handler
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/telemetry/correlation?max_skew_seconds=bad", nil)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 

@@ -38,6 +38,14 @@ func (f *fakeMetricsCollector) Collect(_ context.Context, _ []cloudwatch.Resourc
 	return points, nil
 }
 
+type fakeMetricPointSink struct {
+	points []cloudwatch.MetricPoint
+}
+
+func (f *fakeMetricPointSink) AddMetricPoints(points ...cloudwatch.MetricPoint) {
+	f.points = append(f.points, points...)
+}
+
 func TestMetricsTimelineIngestorIngestOnceAddsOnlyThresholdBreachesAndDedupes(t *testing.T) {
 	pointTS := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	collector := &fakeMetricsCollector{
@@ -78,6 +86,7 @@ func TestMetricsTimelineIngestorIngestOnceAddsOnlyThresholdBreachesAndDedupes(t 
 	}
 
 	timelineSink := &fakeTimeline{}
+	metricSink := &fakeMetricPointSink{}
 	targets := []cloudwatch.ResourceTarget{
 		{Kind: cloudwatch.ResourceKindEC2, InstanceID: "i-123"},
 	}
@@ -93,7 +102,7 @@ func TestMetricsTimelineIngestorIngestOnceAddsOnlyThresholdBreachesAndDedupes(t 
 		targets,
 		collector,
 		timelineSink,
-	)
+	).WithMetricPointSink(metricSink)
 
 	if err := ingestor.ingestOnce(context.Background()); err != nil {
 		t.Fatalf("first metrics ingestion failed: %v", err)
@@ -104,6 +113,9 @@ func TestMetricsTimelineIngestorIngestOnceAddsOnlyThresholdBreachesAndDedupes(t 
 
 	if len(timelineSink.events) != 2 {
 		t.Fatalf("expected 2 timeline events after dedupe/thresholds, got %d", len(timelineSink.events))
+	}
+	if len(metricSink.points) != 2 {
+		t.Fatalf("expected 2 stored metric points after dedupe/thresholds, got %d", len(metricSink.points))
 	}
 	if timelineSink.events[0].Severity != timeline.SeverityWarning {
 		t.Fatalf("expected warning severity, got %s", timelineSink.events[0].Severity)
