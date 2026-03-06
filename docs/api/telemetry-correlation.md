@@ -48,4 +48,7 @@ Status `400 Bad Request`:
 ## Runtime Input
 
 This endpoint reads from the in-memory telemetry signal buffer that is populated by
-runtime ingestion (`FLOW_INGEST_MODE=cloudwatch_logs` or `FLOW_INGEST_MODE=cloudwatch_metrics`).
+runtime ingestion (`FLOW_INGEST_MODE=cloudwatch_logs`, `cloudwatch_metrics`, or `cloudwatch_all`).
+
+For metric+log correlations, use `FLOW_INGEST_MODE=cloudwatch_all`.
+Buffer size can be tuned with `FLOW_SIGNAL_MAX_METRICS` and `FLOW_SIGNAL_MAX_LOGS`.

@@ -15,6 +15,7 @@ const (
 	ModeDisabled         = "disabled"
 	ModeCloudWatchLog    = "cloudwatch_logs"
 	ModeCloudWatchMetric = "cloudwatch_metrics"
+	ModeCloudWatchAll    = "cloudwatch_all"
 
 	defaultPollInterval        = 30 * time.Second
 	defaultCollectWindow       = 5 * time.Minute
@@ -126,6 +127,21 @@ func (c RuntimeConfig) Validate() error {
 		}
 		if len(targets) == 0 {
 			return fmt.Errorf("flow cloudwatch metrics ingestion requires FLOW_CW_METRIC_TARGETS")
+		}
+		if c.MetricWarnThreshold() >= c.MetricErrorThreshold() {
+			return fmt.Errorf("FLOW_CW_METRIC_UTIL_WARN must be lower than FLOW_CW_METRIC_UTIL_ERROR")
+		}
+		return nil
+	case ModeCloudWatchAll:
+		if strings.TrimSpace(c.LogGroupName) == "" {
+			return fmt.Errorf("flow cloudwatch all ingestion requires FLOW_CW_LOG_GROUP")
+		}
+		targets, err := c.MetricTargets()
+		if err != nil {
+			return err
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("flow cloudwatch all ingestion requires FLOW_CW_METRIC_TARGETS")
 		}
 		if c.MetricWarnThreshold() >= c.MetricErrorThreshold() {
 			return fmt.Errorf("FLOW_CW_METRIC_UTIL_WARN must be lower than FLOW_CW_METRIC_UTIL_ERROR")

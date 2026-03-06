@@ -119,6 +119,44 @@ func TestRuntimeConfigValidateCloudWatchMetricsMissingTargets(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigValidateCloudWatchAll(t *testing.T) {
+	t.Setenv("FLOW_INGEST_MODE", "cloudwatch_all")
+	t.Setenv("FLOW_CW_LOG_GROUP", "/aws/ecs/dev")
+	t.Setenv("FLOW_CW_METRIC_TARGETS", "ec2:i-123")
+	t.Setenv("FLOW_CW_METRIC_UTIL_WARN", "65")
+	t.Setenv("FLOW_CW_METRIC_UTIL_ERROR", "85")
+
+	cfg := RuntimeConfigFromEnv()
+	if cfg.NormalizedMode() != ModeCloudWatchAll {
+		t.Fatalf("expected cloudwatch all mode, got %q", cfg.NormalizedMode())
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected all mode config to validate: %v", err)
+	}
+}
+
+func TestRuntimeConfigValidateCloudWatchAllMissingLogGroup(t *testing.T) {
+	t.Setenv("FLOW_INGEST_MODE", "cloudwatch_all")
+	t.Setenv("FLOW_CW_LOG_GROUP", "")
+	t.Setenv("FLOW_CW_METRIC_TARGETS", "ec2:i-123")
+
+	cfg := RuntimeConfigFromEnv()
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for missing log group in all mode")
+	}
+}
+
+func TestRuntimeConfigValidateCloudWatchAllMissingMetricTargets(t *testing.T) {
+	t.Setenv("FLOW_INGEST_MODE", "cloudwatch_all")
+	t.Setenv("FLOW_CW_LOG_GROUP", "/aws/ecs/dev")
+	t.Setenv("FLOW_CW_METRIC_TARGETS", "")
+
+	cfg := RuntimeConfigFromEnv()
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for missing metric targets in all mode")
+	}
+}
+
 func TestRuntimeConfigValidateCloudWatchMetricsBadTarget(t *testing.T) {
 	t.Setenv("FLOW_INGEST_MODE", "cloudwatch_metrics")
 	t.Setenv("FLOW_CW_METRIC_TARGETS", "badtoken")

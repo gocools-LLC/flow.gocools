@@ -23,10 +23,12 @@ Timeline ingestion runtime toggles:
 - `FLOW_INGEST_MODE=disabled` (default)
 - `FLOW_INGEST_MODE=cloudwatch_logs`
 - `FLOW_INGEST_MODE=cloudwatch_metrics`
+- `FLOW_INGEST_MODE=cloudwatch_all` (logs + metrics in parallel)
 - `FLOW_CW_LOG_GROUP=/aws/...` (required in `cloudwatch_logs` mode)
 - `FLOW_CW_METRIC_TARGETS=ec2:i-...,ecs:<cluster>/<service>` (required in `cloudwatch_metrics` mode)
 - `FLOW_CW_METRIC_UTIL_WARN` and `FLOW_CW_METRIC_UTIL_ERROR` for utilization thresholds
 - `FLOW_INGEST_INTERVAL`, `FLOW_INGEST_WINDOW`, `FLOW_INGEST_TIMEOUT`
+- `FLOW_SIGNAL_MAX_METRICS`, `FLOW_SIGNAL_MAX_LOGS` for in-memory correlation buffer capacity
 
 ## Tracing
 

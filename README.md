@@ -58,6 +58,16 @@ FLOW_AWS_REGION=us-east-1 \
 go run ./cmd/flow
 ```
 
+Enable both Logs + Metrics ingestion (recommended for correlation graph):
+
+```bash
+FLOW_INGEST_MODE=cloudwatch_all \
+FLOW_CW_LOG_GROUP=/aws/ecs/dev-api \
+FLOW_CW_METRIC_TARGETS="ec2:i-0123456789abcdef0,ecs:dev-cluster/api-service" \
+FLOW_AWS_REGION=us-east-1 \
+go run ./cmd/flow
+```
+
 Run the ingestion integration harness:
 
 ```bash

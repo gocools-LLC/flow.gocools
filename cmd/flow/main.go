@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -81,7 +82,16 @@ func run() error {
 	defer runCancel()
 
 	timelineService := timeline.NewInMemoryService(nil)
-	signalStore := signals.NewInMemoryStore(signals.Config{})
+	signalStoreConfig := signals.Config{
+		MaxMetrics: envIntOrDefault("FLOW_SIGNAL_MAX_METRICS", 20000),
+		MaxLogs:    envIntOrDefault("FLOW_SIGNAL_MAX_LOGS", 20000),
+	}
+	logger.Info(
+		"signal_store_configuration",
+		"max_metrics", signalStoreConfig.MaxMetrics,
+		"max_logs", signalStoreConfig.MaxLogs,
+	)
+	signalStore := signals.NewInMemoryStore(signalStoreConfig)
 	correlationService := correlation.NewService(signalStore)
 	if err := startTimelineIngestion(runCtx, logger, awsRuntimeConfig, ingestionRuntimeConfig, timelineService, signalStore); err != nil {
 		return err
@@ -155,78 +165,22 @@ func startTimelineIngestion(
 		if strings.TrimSpace(awsConfig.Session.Region) == "" {
 			return fmt.Errorf("flow cloudwatch logs ingestion requires FLOW_AWS_REGION or AWS_REGION")
 		}
-
-		client, err := cloudwatchlogs.NewAWSClient(ctx, cloudwatchlogs.ClientConfig{
-			Region:      awsConfig.Session.Region,
-			RoleARN:     awsConfig.Session.RoleARN,
-			SessionName: awsConfig.Session.SessionName,
-			ExternalID:  awsConfig.Session.ExternalID,
-		})
-		if err != nil {
-			return fmt.Errorf("create cloudwatch logs client: %w", err)
-		}
-
-		collector := cloudwatchlogs.NewCollector(client, cloudwatchlogs.CollectorConfig{
-			Hooks: []cloudwatchlogs.ParseHook{
-				cloudwatchlogs.CorrelationIDRegexHook(),
-			},
-		})
-		ingestor := ingestion.NewLogsTimelineIngestor(logger, runtimeConfig, collector, timelineService)
-		if signalStore != nil {
-			ingestor.WithLogRecordSink(signalStore)
-		}
-		go ingestor.Run(ctx)
-
-		logger.Info(
-			"timeline_ingestion_enabled",
-			"mode", mode,
-			"log_group", runtimeConfig.LogGroupName,
-			"poll_interval", runtimeConfig.PollEvery(),
-			"collect_window", runtimeConfig.Window(),
-			"request_timeout", runtimeConfig.Timeout(),
-			"limit", runtimeConfig.RecordLimit(),
-		)
-		return nil
+		return startCloudWatchLogIngestion(ctx, logger, awsConfig, runtimeConfig, timelineService, signalStore)
 	case ingestion.ModeCloudWatchMetric:
 		if strings.TrimSpace(awsConfig.Session.Region) == "" {
 			return fmt.Errorf("flow cloudwatch metrics ingestion requires FLOW_AWS_REGION or AWS_REGION")
 		}
-
-		targets, err := runtimeConfig.MetricTargets()
-		if err != nil {
+		return startCloudWatchMetricIngestion(ctx, logger, awsConfig, runtimeConfig, timelineService, signalStore)
+	case ingestion.ModeCloudWatchAll:
+		if strings.TrimSpace(awsConfig.Session.Region) == "" {
+			return fmt.Errorf("flow cloudwatch all ingestion requires FLOW_AWS_REGION or AWS_REGION")
+		}
+		if err := startCloudWatchLogIngestion(ctx, logger, awsConfig, runtimeConfig, timelineService, signalStore); err != nil {
 			return err
 		}
-		if len(targets) == 0 {
-			return fmt.Errorf("flow cloudwatch metrics ingestion requires FLOW_CW_METRIC_TARGETS")
+		if err := startCloudWatchMetricIngestion(ctx, logger, awsConfig, runtimeConfig, timelineService, signalStore); err != nil {
+			return err
 		}
-
-		client, err := cloudwatch.NewAWSClient(ctx, cloudwatch.ClientConfig{
-			Region:      awsConfig.Session.Region,
-			RoleARN:     awsConfig.Session.RoleARN,
-			SessionName: awsConfig.Session.SessionName,
-			ExternalID:  awsConfig.Session.ExternalID,
-		})
-		if err != nil {
-			return fmt.Errorf("create cloudwatch metrics client: %w", err)
-		}
-
-		collector := cloudwatch.NewCollector(client, cloudwatch.CollectorConfig{})
-		ingestor := ingestion.NewMetricsTimelineIngestor(logger, runtimeConfig, targets, collector, timelineService)
-		if signalStore != nil {
-			ingestor.WithMetricPointSink(signalStore)
-		}
-		go ingestor.Run(ctx)
-
-		logger.Info(
-			"timeline_ingestion_enabled",
-			"mode", mode,
-			"target_count", len(targets),
-			"poll_interval", runtimeConfig.PollEvery(),
-			"collect_window", runtimeConfig.Window(),
-			"request_timeout", runtimeConfig.Timeout(),
-			"warn_threshold", runtimeConfig.MetricWarnThreshold(),
-			"error_threshold", runtimeConfig.MetricErrorThreshold(),
-		)
 		return nil
 	default:
 		return fmt.Errorf("unsupported FLOW_INGEST_MODE: %q", runtimeConfig.Mode)
@@ -238,10 +192,113 @@ type telemetrySignalStore interface {
 	AddMetricPoints(points ...cloudwatch.MetricPoint)
 }
 
+func startCloudWatchLogIngestion(
+	ctx context.Context,
+	logger *slog.Logger,
+	awsConfig internalaws.RuntimeConfig,
+	runtimeConfig ingestion.RuntimeConfig,
+	timelineService *timeline.InMemoryService,
+	signalStore telemetrySignalStore,
+) error {
+	if strings.TrimSpace(runtimeConfig.LogGroupName) == "" {
+		return fmt.Errorf("flow cloudwatch logs ingestion requires FLOW_CW_LOG_GROUP")
+	}
+
+	client, err := cloudwatchlogs.NewAWSClient(ctx, cloudwatchlogs.ClientConfig{
+		Region:      awsConfig.Session.Region,
+		RoleARN:     awsConfig.Session.RoleARN,
+		SessionName: awsConfig.Session.SessionName,
+		ExternalID:  awsConfig.Session.ExternalID,
+	})
+	if err != nil {
+		return fmt.Errorf("create cloudwatch logs client: %w", err)
+	}
+
+	collector := cloudwatchlogs.NewCollector(client, cloudwatchlogs.CollectorConfig{
+		Hooks: []cloudwatchlogs.ParseHook{
+			cloudwatchlogs.CorrelationIDRegexHook(),
+		},
+	})
+	ingestor := ingestion.NewLogsTimelineIngestor(logger, runtimeConfig, collector, timelineService)
+	if signalStore != nil {
+		ingestor.WithLogRecordSink(signalStore)
+	}
+	go ingestor.Run(ctx)
+
+	logger.Info(
+		"timeline_ingestion_enabled",
+		"mode", runtimeConfig.NormalizedMode(),
+		"log_group", runtimeConfig.LogGroupName,
+		"poll_interval", runtimeConfig.PollEvery(),
+		"collect_window", runtimeConfig.Window(),
+		"request_timeout", runtimeConfig.Timeout(),
+		"limit", runtimeConfig.RecordLimit(),
+	)
+	return nil
+}
+
+func startCloudWatchMetricIngestion(
+	ctx context.Context,
+	logger *slog.Logger,
+	awsConfig internalaws.RuntimeConfig,
+	runtimeConfig ingestion.RuntimeConfig,
+	timelineService *timeline.InMemoryService,
+	signalStore telemetrySignalStore,
+) error {
+	targets, err := runtimeConfig.MetricTargets()
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("flow cloudwatch metrics ingestion requires FLOW_CW_METRIC_TARGETS")
+	}
+
+	client, err := cloudwatch.NewAWSClient(ctx, cloudwatch.ClientConfig{
+		Region:      awsConfig.Session.Region,
+		RoleARN:     awsConfig.Session.RoleARN,
+		SessionName: awsConfig.Session.SessionName,
+		ExternalID:  awsConfig.Session.ExternalID,
+	})
+	if err != nil {
+		return fmt.Errorf("create cloudwatch metrics client: %w", err)
+	}
+
+	collector := cloudwatch.NewCollector(client, cloudwatch.CollectorConfig{})
+	ingestor := ingestion.NewMetricsTimelineIngestor(logger, runtimeConfig, targets, collector, timelineService)
+	if signalStore != nil {
+		ingestor.WithMetricPointSink(signalStore)
+	}
+	go ingestor.Run(ctx)
+
+	logger.Info(
+		"timeline_ingestion_enabled",
+		"mode", runtimeConfig.NormalizedMode(),
+		"target_count", len(targets),
+		"poll_interval", runtimeConfig.PollEvery(),
+		"collect_window", runtimeConfig.Window(),
+		"request_timeout", runtimeConfig.Timeout(),
+		"warn_threshold", runtimeConfig.MetricWarnThreshold(),
+		"error_threshold", runtimeConfig.MetricErrorThreshold(),
+	)
+	return nil
+}
+
 func envOrDefault(key, fallback string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return fallback
 	}
 	return value
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

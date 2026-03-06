@@ -21,6 +21,15 @@ FLOW_CW_METRIC_TARGETS="ec2:i-...,ecs:<cluster>/<service>"
 FLOW_AWS_REGION=<region>
 ```
 
+or:
+
+```bash
+FLOW_INGEST_MODE=cloudwatch_all
+FLOW_CW_LOG_GROUP=/aws/ecs/<service>
+FLOW_CW_METRIC_TARGETS="ec2:i-...,ecs:<cluster>/<service>"
+FLOW_AWS_REGION=<region>
+```
+
 ## Query Parameters
 
 - `start` (optional, RFC3339 UTC): inclusive start timestamp

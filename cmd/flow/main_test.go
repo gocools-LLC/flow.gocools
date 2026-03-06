@@ -113,6 +113,77 @@ func TestStartTimelineIngestionCloudWatchMetricsModeRejectsBadTargets(t *testing
 	}
 }
 
+func TestStartTimelineIngestionCloudWatchAllModeRequiresRegion(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{},
+		ingestion.RuntimeConfig{
+			Mode:             ingestion.ModeCloudWatchAll,
+			LogGroupName:     "/aws/ecs/dev",
+			MetricTargetsRaw: "ec2:i-123",
+		},
+		timeline.NewInMemoryService(nil),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected missing region error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_AWS_REGION or AWS_REGION") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartTimelineIngestionCloudWatchAllModeRequiresLogGroup(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{
+			Session: internalaws.SessionConfig{
+				Region: "us-east-1",
+			},
+		},
+		ingestion.RuntimeConfig{
+			Mode:             ingestion.ModeCloudWatchAll,
+			LogGroupName:     "",
+			MetricTargetsRaw: "ec2:i-123",
+		},
+		timeline.NewInMemoryService(nil),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected missing log group error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_CW_LOG_GROUP") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartTimelineIngestionCloudWatchAllModeRequiresMetricTargets(t *testing.T) {
+	err := startTimelineIngestion(
+		context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		internalaws.RuntimeConfig{
+			Session: internalaws.SessionConfig{
+				Region: "us-east-1",
+			},
+		},
+		ingestion.RuntimeConfig{
+			Mode:             ingestion.ModeCloudWatchAll,
+			LogGroupName:     "/aws/ecs/dev",
+			MetricTargetsRaw: "",
+		},
+		timeline.NewInMemoryService(nil),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected missing metric targets error")
+	}
+	if !strings.Contains(err.Error(), "FLOW_CW_METRIC_TARGETS") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestStartTimelineIngestionRejectsUnknownMode(t *testing.T) {
 	err := startTimelineIngestion(
 		context.Background(),
