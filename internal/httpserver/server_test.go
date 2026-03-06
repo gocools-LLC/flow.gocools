@@ -192,7 +192,7 @@ func TestTelemetryCorrelationEndpointReturnsGraphPayload(t *testing.T) {
 
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v1/telemetry/correlation?start=2026-03-05T10:00:00Z&end=2026-03-05T10:05:00Z&max_skew_seconds=120",
+		"/api/v1/telemetry/correlation?start=2026-03-05T10:00:00Z&end=2026-03-05T10:05:00Z&max_skew_seconds=120&resource_id=i-123&limit_nodes=10&limit_edges=20",
 		nil,
 	)
 	res := httptest.NewRecorder()
@@ -206,6 +206,12 @@ func TestTelemetryCorrelationEndpointReturnsGraphPayload(t *testing.T) {
 	}
 	if correlationService.query.MaxSkew != 120*time.Second {
 		t.Fatalf("expected max skew 120s, got %s", correlationService.query.MaxSkew)
+	}
+	if correlationService.query.ResourceID != "i-123" {
+		t.Fatalf("expected resource filter i-123, got %q", correlationService.query.ResourceID)
+	}
+	if correlationService.query.LimitNodes != 10 || correlationService.query.LimitEdges != 20 {
+		t.Fatalf("unexpected limit params: nodes=%d edges=%d", correlationService.query.LimitNodes, correlationService.query.LimitEdges)
 	}
 
 	var payload correlation.Result
@@ -230,6 +236,27 @@ func TestTelemetryCorrelationEndpointInvalidMaxSkewReturns400(t *testing.T) {
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
+	}
+}
+
+func TestTelemetryCorrelationEndpointInvalidLimitsReturn400(t *testing.T) {
+	handler := New(Config{
+		Version: "test-version",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Handler
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/telemetry/correlation?limit_nodes=bad", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/telemetry/correlation?limit_edges=bad", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
 	}

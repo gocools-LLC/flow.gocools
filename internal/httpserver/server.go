@@ -142,6 +142,17 @@ func telemetryCorrelationHandler(service correlationQueryService) http.HandlerFu
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid max_skew_seconds query parameter"})
 			return
 		}
+		limitNodes, err := parseIntQuery(r, "limit_nodes")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid limit_nodes query parameter"})
+			return
+		}
+		limitEdges, err := parseIntQuery(r, "limit_edges")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid limit_edges query parameter"})
+			return
+		}
+		resourceID := r.URL.Query().Get("resource_id")
 
 		maxSkew := time.Duration(0)
 		if maxSkewSeconds > 0 {
@@ -157,9 +168,12 @@ func telemetryCorrelationHandler(service correlationQueryService) http.HandlerFu
 		}
 
 		result, err := service.QueryGraph(correlation.Query{
-			Start:   start,
-			End:     end,
-			MaxSkew: maxSkew,
+			Start:      start,
+			End:        end,
+			MaxSkew:    maxSkew,
+			ResourceID: resourceID,
+			LimitNodes: limitNodes,
+			LimitEdges: limitEdges,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})

@@ -2,6 +2,8 @@ package correlation
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/gocools-LLC/flow.gocools/internal/graph"
@@ -11,9 +13,12 @@ import (
 )
 
 type Query struct {
-	Start   time.Time
-	End     time.Time
-	MaxSkew time.Duration
+	Start      time.Time
+	End        time.Time
+	MaxSkew    time.Duration
+	ResourceID string
+	LimitNodes int
+	LimitEdges int
 }
 
 type Node struct {
@@ -54,6 +59,12 @@ func (s *Service) QueryGraph(query Query) (Result, error) {
 	if !start.IsZero() && !end.IsZero() && start.After(end) {
 		return Result{}, errors.New("start must be before end")
 	}
+	if query.LimitNodes < 0 {
+		return Result{}, errors.New("limit_nodes must be non-negative")
+	}
+	if query.LimitEdges < 0 {
+		return Result{}, errors.New("limit_edges must be non-negative")
+	}
 
 	if s.store == nil {
 		return Result{
@@ -75,7 +86,28 @@ func (s *Service) QueryGraph(query Query) (Result, error) {
 		MaxSkew: query.MaxSkew,
 	})
 
+	resourceID := strings.TrimSpace(query.ResourceID)
 	nodes := correlationGraph.Nodes()
+	if resourceID != "" {
+		filteredNodes := make([]graph.Node, 0, len(nodes))
+		for _, node := range nodes {
+			if node.Attributes["resource_id"] != resourceID {
+				continue
+			}
+			filteredNodes = append(filteredNodes, node)
+		}
+		nodes = filteredNodes
+	}
+
+	if query.LimitNodes > 0 && len(nodes) > query.LimitNodes {
+		nodes = nodes[:query.LimitNodes]
+	}
+
+	allowedNodeIDs := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		allowedNodeIDs[node.ID] = struct{}{}
+	}
+
 	resultNodes := make([]Node, 0, len(nodes))
 	for _, node := range nodes {
 		resultNodes = append(resultNodes, Node{
@@ -88,11 +120,42 @@ func (s *Service) QueryGraph(query Query) (Result, error) {
 	edges := correlationGraph.Edges()
 	resultEdges := make([]Edge, 0, len(edges))
 	for _, edge := range edges {
+		if _, ok := allowedNodeIDs[edge.From]; !ok {
+			continue
+		}
+		if _, ok := allowedNodeIDs[edge.To]; !ok {
+			continue
+		}
 		resultEdges = append(resultEdges, Edge{
 			From: edge.From,
 			To:   edge.To,
 			Kind: edge.Kind,
 		})
+	}
+	slices.SortStableFunc(resultEdges, func(a, b Edge) int {
+		if a.From < b.From {
+			return -1
+		}
+		if a.From > b.From {
+			return 1
+		}
+		if a.To < b.To {
+			return -1
+		}
+		if a.To > b.To {
+			return 1
+		}
+		if a.Kind < b.Kind {
+			return -1
+		}
+		if a.Kind > b.Kind {
+			return 1
+		}
+		return 0
+	})
+
+	if query.LimitEdges > 0 && len(resultEdges) > query.LimitEdges {
+		resultEdges = resultEdges[:query.LimitEdges]
 	}
 
 	return Result{

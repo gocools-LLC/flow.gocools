@@ -9,6 +9,9 @@
 - `start` (optional, RFC3339 UTC): inclusive start timestamp
 - `end` (optional, RFC3339 UTC): inclusive end timestamp
 - `max_skew_seconds` (optional, int >= 0): correlation tolerance in seconds (default graph behavior applies when omitted)
+- `resource_id` (optional): restrict graph to a single resolved resource ID
+- `limit_nodes` (optional, int >= 0): cap returned node count
+- `limit_edges` (optional, int >= 0): cap returned edge count
 
 ## Response
 
@@ -44,6 +47,11 @@ Status `400 Bad Request`:
   "error": "invalid max_skew_seconds query parameter"
 }
 ```
+
+Possible validation errors:
+
+- `invalid limit_nodes query parameter`
+- `invalid limit_edges query parameter`
 
 ## Runtime Input
 
